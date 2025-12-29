@@ -1,0 +1,388 @@
+import React, { useState, useEffect } from "react";
+import { toast } from "react-toastify";
+import { Card, Grid } from "semantic-ui-react";
+import Admin from "../../abis/Admin.json";
+import Employee from "../../abis/Employee.json";
+import LineChart from "../../components/LineChart";
+import SkillCard from "../../components/SkillCard";
+import "./Employee.css";
+import { buildStyles, CircularProgressbar } from "react-circular-progressbar";
+import CodeforcesGraph from "../../components/CodeforcesGraph";
+import LoadComp from "../../components/LoadComp";
+import { useNavigate } from "react-router-dom";
+
+const EmployeePage = () => {
+  const [state, setState] = useState({
+    employeedata: {},
+    overallEndorsement: [],
+    skills: [],
+    certifications: [],
+    workExps: [],
+    educations: [],
+    colour: ["#b6e498", "#61dafb", "#764abc", "#83cd29", "#00d1b2"],
+    readmore: false,
+    codeforces_res: [],
+    loadcomp: false,
+  });
+
+  const navigate = useNavigate();
+
+  // Define helper functions outside useEffect to avoid stale closures
+  const getSkills = async (EmployeeContract) => {
+    try {
+      const skillCount = await EmployeeContract.methods.getSkillCount().call();
+      const skills = await Promise.all(
+        Array(parseInt(skillCount))
+          .fill()
+          .map((_, index) => EmployeeContract.methods.getSkillByIndex(index).call())
+      );
+
+      const newskills = skills.map((certi) => ({
+        name: certi[0],
+        overall_percentage: certi[1],
+        experience: certi[2],
+        endorsed: certi[3],
+        endorser_address: certi[4],
+        review: certi[5],
+        visible: certi[6],
+      }));
+
+      setState((prev) => ({ ...prev, skills: newskills }));
+    } catch (error) {
+      toast.error("Error fetching skills");
+    }
+  };
+
+  const getCertifications = async (EmployeeContract) => {
+    try {
+      const certiCount = await EmployeeContract.methods.getCertificationCount().call();
+      const certifications = await Promise.all(
+        Array(parseInt(certiCount))
+          .fill()
+          .map((_, index) => EmployeeContract.methods.getCertificationByIndex(index).call())
+      );
+
+      const newcertifications = certifications.map((certi) => ({
+        name: certi[0],
+        organization: certi[1],
+        score: certi[2],
+        endorsed: certi[3],
+        visible: certi[4],
+      }));
+
+      setState((prev) => ({ ...prev, certifications: newcertifications }));
+    } catch (error) {
+      toast.error("Error fetching certifications");
+    }
+  };
+
+  const getWorkExp = async (EmployeeContract) => {
+    try {
+      const workExpCount = await EmployeeContract.methods.getWorkExpCount().call();
+      const workExps = await Promise.all(
+        Array(parseInt(workExpCount))
+          .fill()
+          .map((_, index) => EmployeeContract.methods.getWorkExpByIndex(index).call())
+      );
+
+      const newworkExps = workExps.map((work) => ({
+        role: work[0],
+        organization: work[1],
+        startdate: work[2],
+        enddate: work[3],
+        endorsed: work[4],
+        description: work[5],
+        visible: work[6],
+      }));
+
+      setState((prev) => ({ ...prev, workExps: newworkExps }));
+    } catch (error) {
+      toast.error("Error fetching work experience");
+    }
+  };
+
+  const getEducation = async (EmployeeContract) => {
+    try {
+      const educationCount = await EmployeeContract.methods.getEducationCount().call();
+      const educations = await Promise.all(
+        Array(parseInt(educationCount))
+          .fill()
+          .map((_, index) => EmployeeContract.methods.getEducationByIndex(index).call())
+      );
+
+      const neweducation = educations.map((certi) => ({
+        institute: certi[0],
+        startdate: certi[1],
+        enddate: certi[2],
+        endorsed: certi[3],
+        description: certi[4],
+      }));
+
+      setState((prev) => ({ ...prev, educations: neweducation }));
+    } catch (error) {
+      toast.error("Error fetching education");
+    }
+  };
+
+  useEffect(() => {
+    const loadData = async () => {
+      setState((prev) => ({ ...prev, loadcomp: true }));
+      try {
+        if (!window.web3) {
+          toast.error("Web3 not initialized. Please install MetaMask.");
+          setState((prev) => ({ ...prev, loadcomp: false }));
+          return;
+        }
+
+        const web3 = window.web3;
+        const networkId = await web3.eth.net.getId();
+        const AdminData = Admin.networks[networkId];
+        const accounts = await web3.eth.getAccounts();
+        if (!AdminData) throw new Error("Admin Contract not found on this network");
+
+        const admin = new web3.eth.Contract(Admin.abi, AdminData.address);
+        const employeeContractAddress = await admin.methods
+          .getEmployeeContractByAddress(accounts[0])
+          .call();
+
+        const EmployeeContract = new web3.eth.Contract(Employee.abi, employeeContractAddress);
+        await Promise.all([
+          getSkills(EmployeeContract),
+          getCertifications(EmployeeContract),
+          getWorkExp(EmployeeContract),
+          getEducation(EmployeeContract),
+        ]);
+
+        const employeedata = await EmployeeContract.methods.getEmployeeInfo().call();
+        const newEmployedata = {
+          ethAddress: employeedata[0],
+          name: employeedata[1],
+          location: employeedata[2],
+          description: employeedata[3],
+          overallEndorsement: employeedata[4],
+          endorsecount: employeedata[5],
+        };
+
+        const endorseCount = parseInt(newEmployedata.endorsecount);
+        const overallEndorsement = await Promise.all(
+          Array(endorseCount)
+            .fill()
+            .map((_, index) => EmployeeContract.methods.overallEndorsement(index).call())
+        );
+
+        setState((prev) => ({
+          ...prev,
+          employeedata: newEmployedata,
+          overallEndorsement,
+          loadcomp: false,
+        }));
+      } catch (error) {
+        toast.error(error.message || "Error loading blockchain data");
+        setState((prev) => ({ ...prev, loadcomp: false }));
+      }
+    };
+
+    loadData();
+  }, []);
+
+  return state.loadcomp ? (
+    <LoadComp />
+  ) : (
+    <div>
+      <Grid>
+        <Grid.Row>
+          <Grid.Column width={6}>
+            <Card className="personal-info">
+              <Card.Content>
+                <Card.Header>
+                  {state.employeedata?.name}
+                  <small style={{ wordBreak: "break-word", color: "#c5c6c7" }}>
+                    {state.employeedata?.ethAddress}
+                  </small>
+                </Card.Header>
+                <br />
+                <div>
+                  <p>
+                    <em>Location: </em>
+                    <span style={{ color: "#c5c6c7" }}>
+                      {state.employeedata?.location}
+                    </span>
+                  </p>
+                </div>
+                <br />
+                <div>
+                  <p>
+                    <em>Overall Endorsement Rating:</em>
+                  </p>
+                  <LineChart overallEndorsement={state.overallEndorsement} />
+                </div>
+              </Card.Content>
+            </Card>
+            <Card className="employee-des">
+              <Card.Content>
+                <Card.Header>About:</Card.Header>
+                <div>
+                  <p style={{ color: "#c5c6c7" }}>
+                    {state.employeedata?.description}
+                  </p>
+                </div>
+                <br />
+                <div>
+                  <Card.Header style={{ fontSize: "19px", fontWeight: "600" }}>
+                    Education:
+                  </Card.Header>
+                  <br />
+                  <div className="education">
+                    {state.educations?.map((education, index) => (
+                      <div className="education-design" key={index}>
+                        <div style={{ paddingRight: "50px", color: "#c5c6c7" }}>
+                          <p>{education.description}</p>
+                          <small
+                            style={{ wordBreak: "break-word", fontSize: "10px" }}
+                          >
+                            {education.institute}
+                          </small>
+                        </div>
+                        <div>
+                          <small style={{ color: "#c5c6c7" }}>
+                            <em>
+                              {education.startdate} - {education.enddate}
+                            </em>
+                          </small>
+                          <p
+                            style={{
+                              color: education.endorsed ? "#00d1b2" : "yellow",
+                              opacity: "0.7",
+                            }}
+                          >
+                            {education.endorsed ? "Endorsed" : "Not Yet Endorsed"}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </Card.Content>
+            </Card>
+            <Card className="employee-des">
+              <Card.Content>
+                <Card.Header>Competetive Platform Ratings</Card.Header>
+                <CodeforcesGraph />
+              </Card.Content>
+            </Card>
+          </Grid.Column>
+          <Grid.Column width={10}>
+            <Card className="employee-des">
+              <Card.Content>
+                <Card.Header>Certifications</Card.Header>
+                <br />
+                <div>
+                  {state.certifications?.map(
+                    (certi, index) =>
+                      certi.visible && (
+                        <div key={index} className="certification-container">
+                          <div style={{ color: "#c5c6c7" }}>
+                            <p>{certi.name}</p>
+                            <small style={{ wordBreak: "break-word" }}>
+                              {certi.organization}
+                            </small>
+                            <p
+                              style={{
+                                color: certi.endorsed ? "#00d1b2" : "yellow",
+                                opacity: "0.7",
+                              }}
+                            >
+                              {certi.endorsed
+                                ? "Endorsed"
+                                : "Not Yet Endorsed"}
+                            </p>
+                          </div>
+                          <div>
+                            <div style={{ width: "100px" }}>
+                              <CircularProgressbar
+                                value={certi.score}
+                                text={`Score - ${certi.score}%`}
+                                strokeWidth="5"
+                                styles={buildStyles({
+                                  strokeLinecap: "round",
+                                  textSize: "12px",
+                                  pathTransitionDuration: 1,
+                                  pathColor: `rgba(255,255,255, ${
+                                    certi.score / 100
+                                  })`,
+                                  textColor: "#c5c6c7",
+                                  trailColor: "#393b3fa6",
+                                  backgroundColor: "#c5c6c7",
+                                })}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )
+                  )}
+                </div>
+              </Card.Content>
+            </Card>
+            <Card className="employee-des">
+              <Card.Content>
+                <Card.Header>Work Experiences</Card.Header>
+                <br />
+                <div className="education">
+                  {state.workExps?.map(
+                    (workExp, index) =>
+                      workExp.visible && (
+                        <div className="education-design" key={index}>
+                          <div style={{ color: "#c5c6c7" }}>
+                            <p>{workExp.role}</p>
+                            <small style={{ wordBreak: "break-word" }}>
+                              {workExp.organization}
+                            </small>
+                          </div>
+                          <div>
+                            <small>
+                              <em>
+                                {workExp.startdate} - {workExp.enddate}
+                              </em>
+                            </small>
+                            <p
+                              style={{
+                                color: workExp.endorsed ? "#00d1b2" : "yellow",
+                                opacity: "0.7",
+                              }}
+                            >
+                              {workExp.endorsed
+                                ? "Endorsed"
+                                : "Not Yet Endorsed"}
+                            </p>
+                          </div>
+                        </div>
+                      )
+                  )}
+                </div>
+              </Card.Content>
+            </Card>
+            <Card className="employee-des">
+              <Card.Content>
+                <Card.Header>Skills</Card.Header>
+                <br />
+                <div className="skill-height-container">
+                  {state.skills?.map((skill, index) =>
+                    skill.visible ? (
+                      <div key={index}>
+                        <SkillCard skill={skill} />
+                      </div>
+                    ) : (
+                      <></>
+                    )
+                  )}
+                </div>
+              </Card.Content>
+            </Card>
+          </Grid.Column>
+        </Grid.Row>
+      </Grid>
+    </div>
+  );
+};
+
+export default EmployeePage;
