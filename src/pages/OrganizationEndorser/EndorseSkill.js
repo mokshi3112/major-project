@@ -1,66 +1,82 @@
 import React, { Component } from "react";
 import { Button, Card, Form, Input, Message } from "semantic-ui-react";
-import ScanQR from "../../components/ScanQR";
-import Admin from "../../abis/Admin.json";
-import Organization from "../../abis/OrganizationEndorser.json";
-import { toast } from "react-toastify";
-import { loadContract } from "../../utils/contractHelpers";
 import "./EndorsePage.css";
+import Admin from "../../abis/Admin.json";
+import Employee from "../../abis/Employee.json";
+import Skills from "../../abis/Skills.json";
+import { toast } from "react-toastify";
+import ScanQR from "../../components/ScanQR";
 
-export default class EndorseSkill extends Component {
+export default class EndorseSkil extends Component {
   state = {
     employee_address_skill: "",
     skill_name: "",
     skill_score: "",
     skill_review: "",
-    skillLoading: false,
     skillError: "",
+    skillLoading: false,
     scanQR: false,
   };
 
   handleChange = (e) => {
+    e.preventDefault();
     this.setState({ [e.target.id]: e.target.value });
   };
 
   handleSkillEndorse = async (e) => {
     e.preventDefault();
-    const { employee_address_skill, skill_name, skill_score, skill_review } = this.state;
-    if (!employee_address_skill || !skill_name || !skill_score || !skill_review) {
-      this.setState({ skillError: "Please enter all the fields." });
+    this.setState({ skillLoading: true, skillError: "" });
+    const { employee_address_skill, skill_name, skill_score, skill_review } =
+      this.state;
+    if (
+      !employee_address_skill ||
+      !skill_name ||
+      !(skill_score >= 1 && skill_score <= 100) ||
+      !skill_review
+    ) {
+      toast.error("Please enter all the fields.");
       return;
     }
-    this.setState({ skillLoading: true, skillError: "" });
-    try {
-      const web3 = window.web3;
-      const accounts = await web3.eth.getAccounts();
-      const admin = await loadContract(web3, Admin);
+    e.preventDefault();
+    const web3 = window.web3;
+    const networkId = await web3.eth.net.getId();
+    const AdminData = await Admin.networks[networkId];
+    const SkillData = await Skills.networks[networkId];
+    const accounts = await web3.eth.getAccounts();
+    if (AdminData && SkillData) {
+      const admin = await new web3.eth.Contract(Admin.abi, AdminData.address);
+      const skills = await new web3.eth.Contract(Skills.abi, SkillData.address);
+      const employeeContractAddress = await admin?.methods
+        ?.getEmployeeContractByAddress(employee_address_skill)
+        .call();
+      const EmployeeContract = await new web3.eth.Contract(
+        Employee.abi,
+        employeeContractAddress
+      );
 
-      if (admin) {
-        const orgContractAddress = await admin.methods
-          .getOrganizationContractByAddress(accounts[0])
-          .call();
-        const orgContract = new web3.eth.Contract(
-          Organization.abi,
-          orgContractAddress
-        );
-        await orgContract.methods
-          .endorseSkill(employee_address_skill, skill_name, skill_score, skill_review)
+      try {
+        await EmployeeContract.methods
+          .endorseSkill(skill_name, skill_score, skill_review)
+          .send({
+            from: accounts[0],
+          });
+        await skills?.methods
+          ?.addEmployeeToSkill(skill_name, employee_address_skill)
           .send({ from: accounts[0] });
-        toast.success("Skill Endorsed Successfully!!");
-        this.setState({
-          employee_address_skill: "",
-          skill_name: "",
-          skill_score: "",
-          skill_review: "",
-        });
-      } else {
-        toast.error("Admin Contract not found");
+        toast.success("Skill Endorsed successfully!!");
+      } catch (err) {
+        this.setState({ skillError: err.message });
       }
-    } catch (error) {
-      console.error(error);
-      this.setState({ skillError: error.message });
+    } else {
+      toast.error("The Admin Contract does not exist on this network!");
     }
-    this.setState({ skillLoading: false });
+    this.setState({
+      skillLoading: false,
+      skill_name: "",
+      skill_review: "",
+      skill_score: "",
+      employee_address_skill: "",
+    });
   };
 
   closeScanQRModal = () => {

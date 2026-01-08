@@ -261,7 +261,7 @@ const UpdateProfile = () => {
       />
       <GetSkillsModal
         isOpen={state.skillmodal}
-        closeCertificationModal={closeSkillModal}
+        closeSkillModal={closeSkillModal}
       />
       <GetEducationModal
         isOpen={state.educationmodal}
